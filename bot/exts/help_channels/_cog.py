@@ -20,6 +20,7 @@ NAMESPACE = "help"
 HELP_CHANNEL_TOPIC = """
 This is a Python help channel. You can claim your own help channel in the Python Help: Available category.
 """
+AVAILABLE_HELP_CHANNELS = "**Currently available help channel(s):** {available}"
 
 
 class HelpChannels(commands.Cog):
@@ -71,6 +72,11 @@ class HelpChannels(commands.Cog):
         self.name_queue: t.Deque[str] = None
 
         self.last_notification: t.Optional[datetime] = None
+
+        # Acquiring and modifying the channel to dynamically update the available help channels message.
+        self.how_to_get_help: discord.TextChannel = None
+        self.available_help_channels: t.Set[discord.TextChannel] = set()
+        self.dynamic_message: discord.Message = None
 
         # Asyncio stuff
         self.queue_tasks: t.List[asyncio.Task] = []
@@ -461,3 +467,33 @@ class HelpChannels(commands.Cog):
         self.queue_tasks.remove(task)
 
         return channel
+
+    async def update_available_help_channels(self) -> None:
+        """Updates the dynamic message within #how-to-get-help for available help channels."""
+        if not self.available_help_channels:
+            self.available_help_channels = set(
+                c for c in self.available_category.channels if not _channel.is_excluded_channel(c)
+            )
+
+        available_channels = AVAILABLE_HELP_CHANNELS.format(
+            available=', '.join(c.mention for c in self.available_help_channels) or None
+        )
+
+        if self.how_to_get_help is None:
+            self.how_to_get_help = await channel_utils.try_get_channel(constants.Channels.how_to_get_help)
+
+        if self.dynamic_message is None:
+            last_message = await self.how_to_get_help.history(limit=1).find(lambda m: m.author == self.bot.user)
+
+            if not last_message:
+                self.dynamic_message = await self.how_to_get_help.send(available_channels)
+                log.trace("A dynamic message was sent for later modification because one couldn't be found.")
+            else:
+                await last_message.edit(content=available_channels)
+
+        else:
+            try:
+                await self.dynamic_message.edit(content=available_channels)
+            except discord.NotFound:
+                self.dynamic_message = await self.how_to_get_help.send(available_channels)
+                log.trace("Dynamic has been sent again since previous was removed during process of updating message.")
