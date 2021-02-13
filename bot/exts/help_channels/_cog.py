@@ -120,6 +120,9 @@ class HelpChannels(commands.Cog):
 
         await _caches.unanswered.set(message.channel.id, True)
 
+        # Removing the help channel from the dynamic message, and editing/sending that message.
+        self.available_help_channels.remove(message.channel)
+
         # Not awaited because it may indefinitely hold the lock while waiting for a channel.
         scheduling.create_task(self.move_to_available(), name=f"help_claim_{message.id}")
 
@@ -281,6 +284,10 @@ class HelpChannels(commands.Cog):
         # This may confuse users. So would potentially long delays for the cog to become ready.
         self.close_command.enabled = True
 
+        # Getting channels that need to be included in the dynamic message.
+        await self.update_available_help_channels()
+        log.trace("Dynamic available help message updated.")
+
         await self.init_available()
         _stats.report_counts()
 
@@ -337,6 +344,10 @@ class HelpChannels(commands.Cog):
             channel=channel,
             category_id=constants.Categories.help_available,
         )
+
+        # Adding the help channel to the dynamic message, and editing/sending that message.
+        self.available_help_channels.add(channel)
+        await self.update_available_help_channels()
 
         _stats.report_counts()
 
