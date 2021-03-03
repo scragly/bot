@@ -46,7 +46,9 @@ class APIClient:
     session: t.Optional[aiohttp.ClientSession] = None
     loop: asyncio.AbstractEventLoop = None
 
-    def __init__(self, loop: asyncio.AbstractEventLoop, **kwargs):
+    def __init__(self, bot: Bot, **kwargs):
+        self._bot = bot
+
         auth_headers = {
             'Authorization': f"Token {Keys.site_api}"
         }
@@ -57,13 +59,14 @@ class APIClient:
             kwargs['headers'] = auth_headers
 
         self.session = None
-        self.loop = loop
 
-        self._ready = asyncio.Event(loop=loop)
+        self._ready = asyncio.Event()
         self._creation_task = None
         self._default_session_kwargs = kwargs
 
         self.recreate()
+
+        APIClient.current_client = self
 
     @staticmethod
     def _url_for(endpoint: str) -> str:
@@ -103,9 +106,11 @@ class APIClient:
 
             # Don't schedule a task if one is already in progress.
             if force or self._creation_task is None or self._creation_task.done():
-                self._creation_task = self.loop.create_task(self._create_session(**session_kwargs))
+                loop = asyncio.get_event_loop()
+                self._creation_task = loop.create_task(self._create_session(**session_kwargs))
 
-    async def maybe_raise_for_status(self, response: aiohttp.ClientResponse, should_raise: bool) -> None:
+    @staticmethod
+    async def _maybe_raise_for_status(response: aiohttp.ClientResponse, should_raise: bool) -> None:
         """Raise ResponseCodeError for non-OK response if an exception should be raised."""
         if should_raise and response.status >= 400:
             try:

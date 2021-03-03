@@ -34,7 +34,7 @@ class Bot(commands.Bot):
         self.redis_session: Optional[aioredis.Redis] = None
         self.redis_ready = asyncio.Event()
         self.redis_closed = False
-        self.api_client = api.APIClient(loop=self.loop)
+        self.api_client = api.APIClient(self)
         self.filter_list_cache = defaultdict(dict)
 
         self._connector = None
@@ -184,6 +184,15 @@ class Bot(commands.Bot):
             self.redis_session.close()
             self.redis_ready.clear()
             await self.redis_session.wait_closed()
+
+    @property
+    def guild(self) -> discord.Guild:
+        """Get the primary guild for the bot."""
+        return self.get_guild(constants.Guild.id)
+
+    def get_member(self, id_: int) -> Optional[discord.Member]:
+        """Helper to get a member from the primary guild."""
+        return self.guild.get_member(id_)
 
     def insert_item_into_filter_list_cache(self, item: Dict[str, str]) -> None:
         """Add an item to the bots filter_list_cache."""
