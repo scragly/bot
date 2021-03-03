@@ -1,11 +1,21 @@
+from __future__ import annotations
+
 import asyncio
 import logging
-from typing import Optional
+import typing as t
 from urllib.parse import quote as quote_url
 
 import aiohttp
+from discord import Member
 
-from .constants import Keys, URLs
+from bot.constants import Keys, URLs
+
+from .infractions import Infraction
+from .enums import InfractionType
+from .users import APIUser
+
+if t.TYPE_CHECKING:
+    from bot.bot import Bot
 
 log = logging.getLogger(__name__)
 
@@ -16,7 +26,7 @@ class ResponseCodeError(ValueError):
     def __init__(
         self,
         response: aiohttp.ClientResponse,
-        response_json: Optional[dict] = None,
+        response_json: t.Optional[dict] = None,
         response_text: str = ""
     ):
         self.status = response.status
@@ -32,9 +42,8 @@ class ResponseCodeError(ValueError):
 class APIClient:
     """Django Site API wrapper."""
 
-    # These are class attributes so they can be seen when being mocked for tests.
-    # See commit 22a55534ef13990815a6f69d361e2a12693075d5 for details.
-    session: Optional[aiohttp.ClientSession] = None
+    # For test mocking, see 22a55534ef13990815a6f69d361e2a12693075d5
+    session: t.Optional[aiohttp.ClientSession] = None
     loop: asyncio.AbstractEventLoop = None
 
     def __init__(self, loop: asyncio.AbstractEventLoop, **kwargs):
@@ -111,7 +120,7 @@ class APIClient:
         await self._ready.wait()
 
         async with self.session.request(method.upper(), self._url_for(endpoint), **kwargs) as resp:
-            await self.maybe_raise_for_status(resp, raise_for_status)
+            await self._maybe_raise_for_status(resp, raise_for_status)
             return await resp.json()
 
     async def get(self, endpoint: str, *, raise_for_status: bool = True, **kwargs) -> dict:
@@ -130,7 +139,7 @@ class APIClient:
         """Site API PUT."""
         return await self.request("PUT", endpoint, raise_for_status=raise_for_status, **kwargs)
 
-    async def delete(self, endpoint: str, *, raise_for_status: bool = True, **kwargs) -> Optional[dict]:
+    async def delete(self, endpoint: str, *, raise_for_status: bool = True, **kwargs) -> t.Optional[dict]:
         """Site API DELETE."""
         await self._ready.wait()
 
@@ -138,8 +147,65 @@ class APIClient:
             if resp.status == 204:
                 return None
 
-            await self.maybe_raise_for_status(resp, raise_for_status)
+            await self._maybe_raise_for_status(resp, raise_for_status)
             return await resp.json()
+
+    async def get_infraction(self, id_: int):
+        """Fetch a single infraction with the given ID from the site API."""
+        if not isinstance(id_, int):
+            raise ValueError(f"Infraction ID must be int, not {type(id_)}.")
+        data = await self.get(f"bot/infractions/{id_}")
+        if not data:
+            return None
+        return Infraction(self, self._bot, data)
+
+    async def query_infractions(
+        self,
+        user: t.Union[Member, APIUser, int, None] = None,
+        actor: t.Union[Member, APIUser, int, None] = None,
+        type_: t.Union[InfractionType, str, None] = None,
+        active: t.Optional[bool] = None,
+        hidden: t.Optional[bool] = None,
+        reason: t.Optional[str] = None,
+        *,
+        ordering: t.Optional[t.List[str]] = None
+    ) -> t.List[Infraction]:
+        """Retrieve infractions based on query parameters."""
+        params = dict()
+
+        if user:
+            if isinstance(user, int):
+                params["user__id"] = user
+            else:
+                params["user__id"] = user.id
+
+        if actor:
+            if isinstance(actor, int):
+                params["actor__id"] = user
+            else:
+                params["actor__id"] = user.id
+
+        if type_:
+            # validate and normalise
+            type_ = InfractionType(str(type_))
+            params["type"] = type_.value
+
+        if active is not None:
+            params["active"] = active
+
+        if hidden is not None:
+            params["hidden"] = hidden
+
+        if reason:
+            params["reason"] = reason
+
+        if ordering:
+            params["ordering"] = ",".join(ordering)
+
+        data = await self.get("bot/infractions", params=params)
+        if not data:
+            return []
+        return [Infraction(self, self._bot, infr) for infr in data]
 
 
 def loop_is_running() -> bool:

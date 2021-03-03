@@ -7,13 +7,14 @@ import discord
 from discord.ext import commands
 from discord.ext.commands import Context
 
+from bot import api
 from bot import constants
 from bot.bot import Bot
 from bot.converters import Expiry, InfractionSearchQuery, allowed_strings, proxy_user
 from bot.exts.moderation.infraction import _utils
 from bot.exts.moderation.infraction.infractions import Infractions
 from bot.exts.moderation.modlog import ModLog
-from bot.pagination import LinePaginator
+from bot.pagination import LinePaginator, EmbedFieldPaginator, EmbedLinePaginator
 from bot.utils import time
 from bot.utils.checks import in_whitelist_check, with_role_check
 
@@ -186,6 +187,101 @@ class ModManagement(commands.Cog):
             await ctx.invoke(self.search_user, query)
         else:
             await ctx.invoke(self.search_reason, query)
+
+    @infraction_search_group.command(name="testuser")
+    async def search_test(self, ctx: Context, user: t.Union[discord.User, proxy_user]) -> None:
+        """New infraction user search via models."""
+
+        fmt_title = "{icon} {type}{duration} - {created}{status}"
+        fmt_reason = "`{id}` {reason}"
+
+        results: t.List[api.Infraction] = await ctx.bot.api_client.query_infractions(user=user)
+        if not results:
+            await ctx.send(f"No infractions found for '{user}'")
+
+        active = ""
+        for infr in results:
+            if infr.active:
+                active = (
+                    f"\n{user.mention} is currently {infr.past_tense.lower()} by {user.name} {infr.total_duration}, "
+                    f"ending {infr.expiry_duration}."
+                )
+                break
+
+        paginator = EmbedFieldPaginator(
+            title=f"{len(results)} infractions",
+            description=f"{active}",
+            max_fields=5,
+            max_chars=200,
+            timeout=15,
+        )
+
+        for infr in results:
+            if infr.active:
+                status = f", expires {infr.expiry_duration}"
+            else:
+                status = ""
+
+            paginator.add_field(
+                name=fmt_title.format(
+                    icon=infr.icon,
+                    type=infr.past_tense,
+                    duration=f" {infr.total_duration}" if infr.total_duration else "",
+                    created=infr.created_duration,
+                    status=status,
+                ),
+                value=fmt_reason.format(
+                    id=infr.id,
+                    reason=infr.reason,
+                ),
+            )
+
+        paginator.embed.set_author(name=f"{user} — {user.id}", icon_url=user.avatar_url)
+
+        await paginator.start(ctx)
+
+    @infraction_search_group.command(name="testdetail")
+    async def search_detail(self, ctx: Context, infraction: api.Infraction) -> None:
+        """New infraction details view via models."""
+        pass
+
+    @commands.command(name="linetest")
+    async def linetest(self, ctx):
+        paginator = EmbedLinePaginator(title="This is a header", max_lines=10)
+        a = """Bent double, like old beggars under sacks,
+Knock-kneed, coughing like hags, we cursed through sludge,
+Till on the haunting flares we turned our backs,
+And towards our distant rest began to trudge.
+Men marched asleep. Many had lost their boots,
+But limped on, blood-shod. All went lame; all blind;
+Drunk with fatigue; deaf even to the hoots
+Of gas-shells dropping softly behind.
+
+Gas! GAS! Quick, boys!—An ecstasy of fumbling
+Fitting the clumsy helmets just in time,
+But someone still was yelling out and stumbling
+And flound’ring like a man in fire or lime.—
+Dim through the misty panes and thick green light,
+As under a green sea, I saw him drowning.
+
+In all my dreams before my helpless sight,
+He plunges at me, guttering, choking, drowning.
+
+If in some smothering dreams, you too could pace
+Behind the wagon that we flung him in,
+And watch the white eyes writhing in his face,
+His hanging face, like a devil’s sick of sin;
+If you could hear, at every jolt, the blood
+Come gargling from the froth-corrupted lungs,
+Obscene as cancer, bitter as the cud
+Of vile, incurable sores on innocent tongues,—
+My friend, you would not tell with such high zest
+To children ardent for some desperate glory,
+The old Lie: Dulce et decorum est
+Pro patria mori.""".splitlines()
+        for line in a:
+            paginator.add_line(line)
+        await paginator.start(ctx)
 
     @infraction_search_group.command(name="user", aliases=("member", "id"))
     async def search_user(self, ctx: Context, user: t.Union[discord.User, proxy_user]) -> None:
